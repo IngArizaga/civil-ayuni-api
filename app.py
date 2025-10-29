@@ -2,6 +2,8 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 import os
+import PyPDF2
+import glob
 
 app = FastAPI(title="API Ingeniería Civil Ayuni")
 
@@ -14,40 +16,64 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 class SearchRequest(BaseModel):
     query: str
 
+
+def buscar_en_pdfs(query):
+    """Busca el texto en todos los PDFs de la carpeta"""
+    resultados = []
+    pdf_folder = "./pdfs"
+
+    if not os.path.exists(pdf_folder):
+        return [{"page": 1, "content": "Carpeta de PDFs no encontrada"}]
+
+    for pdf_file in glob.glob(os.path.join(pdf_folder, "*.pdf")):
+        try:
+            with open(pdf_file, 'rb') as file:
+                reader = PyPDF2.PdfReader(file)
+                for page_num in range(len(reader.pages)):
+                    page = reader.pages[page_num]
+                    text = page.extract_text()
+                    if query.lower() in text.lower():
+                        resultados.append({
+                            "archivo": os.path.basename(pdf_file),
+                            "page": page_num + 1,
+                            "content": text[:500] + "..."  # Primeros 500 caracteres
+                        })
+        except Exception as e:
+            continue
+
+    if not resultados:
+        return [{"page": 1, "content": f"No se encontraron resultados para '{query}'"}]
+
+    return resultados
+
+
 @app.post("/search")
 async def search_pdfs(request: SearchRequest):
-    """Endpoint de búsqueda para el GPT de Ingeniería Civil"""
+    """Endpoint de búsqueda en PDFs reales"""
+    resultados = buscar_en_pdfs(request.query)
+
     return {
         "success": True,
-        "results": [
-            {
-                "page": 1,
-                "content": f"Información técnica especializada sobre {request.query} - Diseño estructural y normativas aplicables"
-            },
-            {
-                "page": 2,
-                "content": f"Aplicaciones prácticas de {request.query} en proyectos de ingeniería civil - Análisis de casos reales"
-            },
-            {
-                "page": 3,
-                "content": f"Cálculos y procedimientos para {request.query} según normativas internacionales ACI, AISC y Eurocódigos"
-            }
-        ]
+        "results": resultados
     }
+
 
 @app.get("/")
 async def root():
     return {"status": "✅ API de Ingeniería Civil Ayuni activa", "version": "1.0"}
 
+
 @app.get("/health")
 async def health():
     return {"status": "healthy"}
 
-# ⚠️ ESTO ES ESENCIAL - NO LO QUITES ⚠️
+
 if __name__ == "__main__":
     import uvicorn
+
     port = int(os.environ.get("PORT", 10000))
     uvicorn.run(app, host="0.0.0.0", port=port)
